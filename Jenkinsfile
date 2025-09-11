@@ -3,7 +3,7 @@ pipeline {
   options { timestamps() }
 
   environment {
-    MAIL_TO = 'ayodyaekanayaka8@gmail.com' 
+    MAIL_TO = 'ayodyaekanayaka8@gmail.com'   // <-- change if needed
   }
 
   stages {
@@ -21,18 +21,23 @@ pipeline {
 
     stage('Test') {
       steps {
-        bat '''
-          if not exist reports mkdir reports
-          npm test > reports\\test.log 2>&1
-        '''
+        script {
+          // Run tests; if they fail, mark stage FAILURE but keep pipeline going (build becomes UNSTABLE)
+          catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+            bat '''
+              if not exist reports mkdir reports
+              npm test > reports\\test.log 2>&1
+            '''
+          }
+        }
       }
       post {
         always {
           emailext(
             to: env.MAIL_TO,
             subject: "${env.JOB_NAME} #${env.BUILD_NUMBER} – TEST stage: ${currentBuild.currentResult}",
-            body: """<p>The <b>Test</b> stage has finished with status: <b>${currentBuild.currentResult}</b>.</p>
-                     <p>Attached: console log and test log.</p>""",
+            body: """<p><b>Test</b> stage finished with: <b>${currentBuild.currentResult}</b>.</p>
+                     <p>Job: ${env.JOB_NAME} | Build: #${env.BUILD_NUMBER}</p>""",
             mimeType: 'text/html',
             attachLog: true,
             attachmentsPattern: 'reports/test.log'
@@ -43,19 +48,23 @@ pipeline {
 
     stage('Security Scan') {
       steps {
-        // Do not fail the whole build just because audit finds vulns; still email results
-        bat '''
-          if not exist reports mkdir reports
-          cmd /c npm audit --json > reports\\npm-audit.json 2>&1
-          cmd /c npm audit > reports\\npm-audit.txt 2>&1
-        '''
+        script {
+          // Run npm audit; never abort pipeline even if it finds vulnerabilities
+          catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+            bat '''
+              if not exist reports mkdir reports
+              cmd /c npm audit --json > reports\\npm-audit.json 2>&1
+              cmd /c npm audit > reports\\npm-audit.txt 2>&1
+            '''
+          }
+        }
       }
       post {
         always {
           emailext(
             to: env.MAIL_TO,
             subject: "${env.JOB_NAME} #${env.BUILD_NUMBER} – SECURITY SCAN: ${currentBuild.currentResult}",
-            body: """<p>The <b>Security Scan</b> stage has finished with status: <b>${currentBuild.currentResult}</b>.</p>
+            body: """<p><b>Security Scan</b> finished with: <b>${currentBuild.currentResult}</b>.</p>
                      <p>Attached: npm-audit reports and console log.</p>""",
             mimeType: 'text/html',
             attachLog: true,
