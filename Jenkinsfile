@@ -13,11 +13,14 @@ pipeline {
     }
 
     stage('Run Tests') {
-      steps { bat 'cmd /c npm test || exit /b 0' }
+      steps { bat 'cmd /c npm test || exit /b 0' }  // allow pipeline to continue
     }
 
     stage('Generate Coverage Report') {
-      steps { bat 'cmd /c npm run coverage || exit /b 0' }
+      steps {
+        // run if script exists; otherwise continue
+        bat 'cmd /c npm run coverage || exit /b 0'
+      }
     }
 
     stage('NPM Audit (Security Scan)') {
@@ -33,7 +36,8 @@ pipeline {
             Set-Location .sonar/tools
 
             $scVersion = "5.0.1.3006"
-            $zipName = "sonar-scanner-cli-$scVersion-windows.zip"
+            $zipName   = "sonar-scanner-cli-$scVersion-windows.zip"
+
             if (!(Test-Path "sonar-scanner-$scVersion-windows")) {
               Invoke-WebRequest -Uri "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/$zipName" -OutFile $zipName
               Expand-Archive -LiteralPath $zipName -DestinationPath .
@@ -44,6 +48,8 @@ pipeline {
             $env:PATH = "$($scannerDir.FullName)\\bin;$env:PATH"
 
             Set-Location ../..
+
+            # IMPORTANT: org key must match SonarCloud exactly (likely lowercase)
             sonar-scanner -D"sonar.login=$env:SC_TOKEN"
           '''
         }
