@@ -3,12 +3,15 @@ pipeline {
   options { timestamps() }
 
   environment {
-    NOTIFY = 'ayodyaekanayaka8@gmail.com'   // <- change if needed
+    // ======= change if you want to mail a different address =======
+    EMAIL_TO = 'ayodyaekanayaka8@gmail.com'
   }
 
   stages {
     stage('Checkout') {
-      steps { checkout scm }
+      steps {
+        checkout scm
+      }
     }
 
     stage('Install Dependencies') {
@@ -19,33 +22,32 @@ pipeline {
 
     stage('Test') {
       steps {
-        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-          bat '''
-            if not exist reports mkdir reports
-            npm test 1>reports\\test.log 2>&1
-          '''
-        }
-      }
-      post {
-        always {
-          archiveArtifacts artifacts: 'reports/test.log', onlyIfSuccessful: false
-        }
-        success {
+        script {
+          // ensure reports dir exists
+          bat 'if not exist reports mkdir reports'
+
+          // run tests without failing the stage; capture exit code
+          int rc = bat(returnStatus: true, script: 'npm test 1>reports\\test.log 2>&1')
+          String stageStatus = (rc == 0) ? 'SUCCESS' : 'FAILURE'
+
+          // mark build UNSTABLE on failure so pipeline continues
+          if (rc != 0) { currentBuild.result = 'UNSTABLE' }
+
+          // archive and email
+          archiveArtifacts artifacts: 'reports/test.log', allowEmptyArchive: true
           emailext(
-            to: env.NOTIFY,
-            subject: '8.2CDevSecOps | Test stage: SUCCESS',
-            body: '<p>Stage: <b>Test</b></p><p>Status: <b>SUCCESS</b></p><p>See attached test log and console for details.</p>',
-            attachLog: true,
-            attachmentsPattern: 'reports/test.log'
-          )
-        }
-        failure {
-          emailext(
-            to: env.NOTIFY,
-            subject: '8.2CDevSecOps | Test stage: FAILURE',
-            body: '<p>Stage: <b>Test</b></p><p>Status: <b>FAILURE</b></p><p>See attached test log and console for details.</p>',
-            attachLog: true,
-            attachmentsPattern: 'reports/test.log'
+            to: EMAIL_TO,
+            subject: "[${env.JOB_NAME}] ${env.STAGE_NAME}: ${stageStatus} (#${env.BUILD_NUMBER})",
+            attachmentsPattern: 'reports/test.log',
+            body: """\
+Stage : ${env.STAGE_NAME}
+Status: ${stageStatus}
+
+Job   : ${env.JOB_NAME} #${env.BUILD_NUMBER}
+URL   : ${env.BUILD_URL}
+
+Attached: test.log
+"""
           )
         }
       }
@@ -53,35 +55,31 @@ pipeline {
 
     stage('Security Scan') {
       steps {
-        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-          bat '''
-            if not exist reports mkdir reports
-            cmd /c npm audit --json 1>reports\\npm-audit.json 2>&1
-            cmd /c npm audit        1>reports\\npm-audit.txt  2>&1
-            type reports\\npm-audit.txt
-          '''
-        }
-      }
-      post {
-        always {
-          archiveArtifacts artifacts: 'reports/npm-audit.*', onlyIfSuccessful: false
-        }
-        success {
+        script {
+          bat 'if not exist reports mkdir reports'
+
+          // write both JSON and text reports; capture return code from the text run
+          bat 'cmd /c npm audit --json  1>reports\\npm-audit.json 2>&1'
+          int rc = bat(returnStatus: true, script: 'cmd /c npm audit 1>reports\\npm-audit.txt 2>&1')
+          bat 'type reports\\npm-audit.txt'  // print into console for visibility
+
+          String stageStatus = (rc == 0) ? 'SUCCESS' : 'FAILURE'
+          if (rc != 0) { currentBuild.result = 'UNSTABLE' }
+
+          archiveArtifacts artifacts: 'reports/npm-audit.*', allowEmptyArchive: true
           emailext(
-            to: env.NOTIFY,
-            subject: '8.2CDevSecOps | Security Scan stage: SUCCESS',
-            body: '<p>Stage: <b>Security Scan</b></p><p>Status: <b>SUCCESS</b></p><p>Find results attached and in console.</p>',
-            attachLog: true,
-            attachmentsPattern: 'reports/npm-audit.*'
-          )
-        }
-        failure {
-          emailext(
-            to: env.NOTIFY,
-            subject: '8.2CDevSecOps | Security Scan stage: FAILURE',
-            body: '<p>Stage: <b>Security Scan</b></p><p>Status: <b>FAILURE</b></p><p>Find results attached and in console.</p>',
-            attachLog: true,
-            attachmentsPattern: 'reports/npm-audit.*'
+            to: EMAIL_TO,
+            subject: "[${env.JOB_NAME}] ${env.STAGE_NAME}: ${stageStatus} (#${env.BUILD_NUMBER})",
+            attachmentsPattern: 'reports/npm-audit.*',
+            body: """\
+Stage : ${env.STAGE_NAME}
+Status: ${stageStatus}
+
+Job   : ${env.JOB_NAME} #${env.BUILD_NUMBER}
+URL   : ${env.BUILD_URL}
+
+Attached: npm-audit.txt, npm-audit.json
+"""
           )
         }
       }
